@@ -406,6 +406,9 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             message = format_runtime_provider_error(exc)
             raise RuntimeError(message) from exc
 
+        # Read max_tokens from config.yaml model section (same as gateway)
+        _cron_max_tokens = _cfg.get("model", {}).get("max_tokens")
+
         from agent.smart_model_routing import resolve_turn_route
         turn_route = resolve_turn_route(
             prompt,
@@ -418,6 +421,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 "api_mode": runtime.get("api_mode"),
                 "command": runtime.get("command"),
                 "args": list(runtime.get("args") or []),
+                "max_tokens": int(_cron_max_tokens) if _cron_max_tokens is not None else None,
             },
         )
 
@@ -429,6 +433,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             api_mode=turn_route["runtime"].get("api_mode"),
             acp_command=turn_route["runtime"].get("command"),
             acp_args=turn_route["runtime"].get("args"),
+            max_tokens=turn_route["runtime"].get("max_tokens"),
             max_iterations=max_iterations,
             reasoning_config=reasoning_config,
             prefill_messages=prefill_messages,

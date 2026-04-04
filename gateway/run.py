@@ -292,7 +292,7 @@ def _resolve_runtime_agent_kwargs() -> dict:
     except Exception as exc:
         raise RuntimeError(format_runtime_provider_error(exc)) from exc
 
-    return {
+    result = {
         "api_key": runtime.get("api_key"),
         "base_url": runtime.get("base_url"),
         "provider": runtime.get("provider"),
@@ -301,6 +301,22 @@ def _resolve_runtime_agent_kwargs() -> dict:
         "args": list(runtime.get("args") or []),
         "credential_pool": runtime.get("credential_pool"),
     }
+
+    # Read max_tokens from config.yaml model section so gateway-spawned
+    # agents respect the configured output token limit.
+    try:
+        import yaml as _y
+        _cfg_path = _hermes_home / "config.yaml"
+        if _cfg_path.exists():
+            with open(_cfg_path, encoding="utf-8") as _f:
+                _cfg = _y.safe_load(_f) or {}
+            _mt = _cfg.get("model", {}).get("max_tokens")
+            if _mt is not None:
+                result["max_tokens"] = int(_mt)
+    except Exception:
+        pass
+
+    return result
 
 
 def _build_media_placeholder(event) -> str:
@@ -768,6 +784,7 @@ class GatewayRunner:
             "api_mode": runtime_kwargs.get("api_mode"),
             "command": runtime_kwargs.get("command"),
             "args": list(runtime_kwargs.get("args") or []),
+            "max_tokens": runtime_kwargs.get("max_tokens"),
             "credential_pool": runtime_kwargs.get("credential_pool"),
         }
         return resolve_turn_route(user_message, getattr(self, "_smart_model_routing", {}), primary)

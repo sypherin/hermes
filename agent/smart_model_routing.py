@@ -124,6 +124,7 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
                 "command": primary.get("command"),
                 "args": list(primary.get("args") or []),
                 "credential_pool": primary.get("credential_pool"),
+                "max_tokens": primary.get("max_tokens"),
             },
             "label": None,
             "signature": (
@@ -160,6 +161,7 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
                 "command": primary.get("command"),
                 "args": list(primary.get("args") or []),
                 "credential_pool": primary.get("credential_pool"),
+                "max_tokens": primary.get("max_tokens"),
             },
             "label": None,
             "signature": (
