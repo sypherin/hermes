@@ -956,6 +956,8 @@ def resolve_provider_client(
         provider = "openai-codex"
     if provider == "main":
         provider = "custom"
+    if provider in ("llamacpp", "lmstudio", "ollama", "vllm"):
+        provider = "custom"
 
     # ── Auto: try all providers in priority order ────────────────────
     if provider == "auto":
