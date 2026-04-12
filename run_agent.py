@@ -1350,6 +1350,41 @@ class AIAgent:
             return {"max_completion_tokens": value}
         return {"max_tokens": value}
 
+    def _looks_like_transitional_prelude(self, content: str) -> bool:
+        """
+        Detect mid-turn narration that is NOT a self-contained answer.
+
+        When a turn carries BOTH content AND tool_calls, the content is
+        normally captured as a fallback final response (see
+        _last_content_with_tools).  But common narration patterns like
+        "Now let me draft the report" or "I'll scan the subreddits next"
+        are prelude announcements, not answers — promoting them to
+        final_response produces bogus cron output where the real answer
+        lives in the tool output the model was about to produce.
+
+        Heuristic: short content that begins with a future-tense intent
+        marker ("let me", "now i'll", "first,", "next,", ...) or ends with
+        "..." / ":" is a prelude.
+        """
+        if not content:
+            return True
+        stripped = self._strip_think_blocks(content).strip()
+        if not stripped:
+            return True
+        lower = stripped.lower()
+        _PRELUDE_STARTS = (
+            "let me ", "now let me ", "now i'll ", "now i will ",
+            "i'll ", "i will ", "okay, let me ", "ok, let me ",
+            "ok let me ", "okay let me ", "first, ", "next, ",
+            "now, ", "alright, ", "alright let me ", "let's ",
+            "now let's ",
+        )
+        if len(stripped) < 180 and lower.startswith(_PRELUDE_STARTS):
+            return True
+        if len(stripped) < 80 and (stripped.endswith("...") or stripped.endswith(":")):
+            return True
+        return False
+
     def _has_content_after_think_block(self, content: str) -> bool:
         """
         Check if content has actual text after any reasoning/thinking blocks.
@@ -4080,6 +4115,16 @@ class AIAgent:
             stream = request_client_holder["client"].chat.completions.create(**stream_kwargs)
 
             content_parts: list = []
+            # Quarantine buffer: content that arrives AFTER tool_calls have
+            # started streaming.  Some provider-side streaming parsers
+            # (observed on NIM kimi-k2.5, and historically GLM) leak raw
+            # tool_call argument tokens into delta.content when the model
+            # uses a native text-based tool_call format that the OpenAI
+            # wrapper parses incompletely.  By quarantining post-tool content
+            # we can validate at end-of-stream whether it's a substring of
+            # any accumulated tool_call arguments (→ leak, drop) or genuine
+            # mid-turn prose (→ fold back into content_parts).
+            tool_phase_content_parts: list = []
             tool_calls_acc: dict = {}
             tool_gen_notified: set = set()
             # Ollama-compatible endpoints reuse index 0 for every tool call
@@ -4124,12 +4169,15 @@ class AIAgent:
 
                 # Accumulate text content — fire callback only when no tool calls
                 if delta and delta.content:
-                    content_parts.append(delta.content)
                     if not tool_calls_acc:
+                        content_parts.append(delta.content)
                         _fire_first_delta()
                         self._fire_stream_delta(delta.content)
                         deltas_were_sent["yes"] = True
                     else:
+                        # Quarantine — may be a provider tool_call text leak.
+                        # Validated and reconciled at end-of-stream below.
+                        tool_phase_content_parts.append(delta.content)
                         # Tool calls suppress regular content streaming (avoids
                         # displaying chatty "I'll use the tool..." text alongside
                         # tool calls).  But reasoning tags embedded in suppressed
@@ -4203,6 +4251,29 @@ class AIAgent:
                 # Usage in the final chunk
                 if hasattr(chunk, "usage") and chunk.usage:
                     usage_obj = chunk.usage
+
+            # Reconcile tool-phase quarantined content.  If the buffered
+            # text is a substring of any tool_call's accumulated arguments,
+            # the provider leaked raw tool_call JSON into delta.content
+            # (observed on NIM kimi-k2.5 and historically on GLM).  Drop it.
+            # Otherwise it is genuine mid-tool prose and we fold it back in.
+            if tool_phase_content_parts:
+                tool_phase_text = "".join(tool_phase_content_parts)
+                is_arg_leak = False
+                if tool_phase_text and tool_calls_acc:
+                    for _tc in tool_calls_acc.values():
+                        _args = _tc.get("function", {}).get("arguments") or ""
+                        if _args and tool_phase_text in _args:
+                            is_arg_leak = True
+                            break
+                if is_arg_leak:
+                    logger.warning(
+                        "Provider tool_call text leak suppressed: %d chars of delta.content matched tool_call arguments (model=%s)",
+                        len(tool_phase_text),
+                        model_name or "unknown",
+                    )
+                else:
+                    content_parts.extend(tool_phase_content_parts)
 
             # Build mock response matching non-streaming shape
             full_content = "".join(content_parts) or None
@@ -8206,8 +8277,18 @@ class AIAgent:
                     # as a fallback final response. Common pattern: model delivers its
                     # answer and calls memory/skill tools as a side-effect in the same
                     # turn. If the follow-up turn after tools is empty, we use this.
+                    #
+                    # But skip transitional preludes like "Now let me draft the report" —
+                    # those are mid-thought narration, not answers. Using them as
+                    # fallback produced bogus cron reports (e.g. Gig Scanner sending
+                    # "Now let me draft proposals for the top 3 gigs" as the final
+                    # output while the real report sat in a written file).
                     turn_content = assistant_message.content or ""
-                    if turn_content and self._has_content_after_think_block(turn_content):
+                    if (
+                        turn_content
+                        and self._has_content_after_think_block(turn_content)
+                        and not self._looks_like_transitional_prelude(turn_content)
+                    ):
                         self._last_content_with_tools = turn_content
                         # Only mute subsequent output when EVERY tool call in
                         # this turn is post-response housekeeping (memory, todo,
