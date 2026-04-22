@@ -43,8 +43,14 @@ from tools.tool_backend_helpers import managed_nous_tools_enabled
 
 logger = logging.getLogger(__name__)
 
-# Configuration for image generation
-DEFAULT_MODEL = "fal-ai/flux-2-pro"
+# Configuration for image generation.
+# Default FLUX 2 Pro produces high-quality but 30-90s per image with upscaling.
+# Swap via env var HERMES_FAL_IMAGE_MODEL to something faster:
+#   - fal-ai/flux/schnell       (~3-5s, lower quality)
+#   - fal-ai/flux/dev           (~8-15s, balanced)
+#   - fal-ai/fast-sdxl          (~5-10s)
+#   - fal-ai/flux-2-pro         (~30-90s, highest quality — default)
+DEFAULT_MODEL = os.getenv("HERMES_FAL_IMAGE_MODEL", "fal-ai/flux-2-pro")
 DEFAULT_ASPECT_RATIO = "landscape"
 DEFAULT_NUM_INFERENCE_STEPS = 50
 DEFAULT_GUIDANCE_SCALE = 4.5
