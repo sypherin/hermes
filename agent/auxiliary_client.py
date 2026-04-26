@@ -100,6 +100,11 @@ def _normalize_aux_provider(provider: Optional[str]) -> str:
             normalized = main_prov
         else:
             return "custom"
+    # Local-provider aliases — local llama-server / lmstudio / ollama / vllm
+    # all expose OpenAI-compatible endpoints so they route through "custom".
+    # Local patch carried across 2026-04-26 upstream rebase.
+    if normalized in ("llamacpp", "lmstudio", "ollama", "vllm"):
+        return "custom"
     return _PROVIDER_ALIASES.get(normalized, normalized)
 
 

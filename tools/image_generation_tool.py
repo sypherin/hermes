@@ -290,7 +290,9 @@ FAL_MODELS: Dict[str, Dict[str, Any]] = {
 }
 
 # Default model is the fastest reasonable option. Kept cheap and sub-1s.
-DEFAULT_MODEL = "fal-ai/flux-2/klein/9b"
+# Override via env var HERMES_FAL_IMAGE_MODEL.  Local patch carried across
+# 2026-04-26 upstream rebase.
+DEFAULT_MODEL = os.getenv("HERMES_FAL_IMAGE_MODEL", "fal-ai/flux-2/klein/9b")
 
 DEFAULT_ASPECT_RATIO = "landscape"
 VALID_ASPECT_RATIOS = ("landscape", "square", "portrait")

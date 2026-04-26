@@ -1019,6 +1019,17 @@ def _build_child_agent(
     except Exception as exc:
         logger.debug("Could not load delegation reasoning_effort: %s", exc)
 
+    # Inherit the parent's fallback chain so subagents can failover too.
+    # Without this, every subagent gets an empty _fallback_chain and the
+    # retry loop in run_agent.py gives up with "API call failed after N retries"
+    # even when the parent has NIM/local-Qwen fallbacks configured.
+    # Local patch (carried across the 2026-04-26 upstream rebase) — upstream
+    # still doesn't pass fallback_model= into the child AIAgent constructor.
+    inherited_fallback_chain = (
+        list(getattr(parent_agent, "_fallback_chain", None) or [])
+        or getattr(parent_agent, "_fallback_model", None)
+    )
+
     child = AIAgent(
         base_url=effective_base_url,
         api_key=effective_api_key,
@@ -1046,6 +1057,7 @@ def _build_child_agent(
         providers_ignored=parent_agent.providers_ignored,
         providers_order=parent_agent.providers_order,
         provider_sort=parent_agent.provider_sort,
+        fallback_model=inherited_fallback_chain,
         tool_progress_callback=child_progress_cb,
         iteration_budget=None,  # fresh budget per subagent
     )
